@@ -1,0 +1,534 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Play, Square, RotateCcw, History, ChevronRight, ChevronLeft, ArrowLeft, Dumbbell, Clock, X, Check, Activity, Settings, Download, Upload, FileJson, Trash2, Timer as TimerIcon, Save } from 'lucide-react';
+
+// --- SCHEDA DI DEFAULT (Se non carichi nulla, usa questa) ---
+const DEFAULT_WORKOUT_DATA = {
+  "Giorno 1 (Petto/Tricipiti)": [
+    { 
+      id: 'panca_piana', 
+      name: 'Panca Piana Bilanciere', 
+      sets: 5, 
+      reps: ['3', '1', '1', '1', '2'], 
+      rpe: ['3', '4', '6', '8', '8'],   
+      rest: '2:00',
+      tempo: '1-1-1-2'
+    },
+    { 
+      id: 'panca_inclinata_mp', 
+      name: 'Panca Inclinata MP', 
+      sets: 3, 
+      reps: '8', 
+      rpe: ['4', '5', '10'], 
+      rest: '2:00',
+      tempo: 'Standard'
+    }
+  ],
+  "Giorno 2 (Dorso/Bicipiti)": [
+     { 
+      id: 't_bar', 
+      name: 'T-Bar Presa Prona', 
+      sets: 5, 
+      reps: '5', 
+      rpe: '7-9', 
+      rest: '1:40',
+      tempo: '1-1-1-2'
+    }
+  ]
+};
+
+const App = () => {
+  const [view, setView] = useState('home');
+  const [activeDay, setActiveDay] = useState(null);
+  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
+  
+  // STATO PER I DATI DELLA SCHEDA (Dinamico!)
+  const [workoutData, setWorkoutData] = useState(DEFAULT_WORKOUT_DATA);
+  
+  const [logs, setLogs] = useState({});
+  const [sessionState, setSessionState] = useState({});
+  const [timerValues, setTimerValues] = useState({ time: 0, isRunning: false });
+  const [showHistory, setShowHistory] = useState(false);
+  
+  const backupInputRef = useRef(null);
+  const planInputRef = useRef(null);
+
+  // --- INIZIALIZZAZIONE ---
+  useEffect(() => {
+    // 1. Carica Logs e Sessioni
+    const savedLogs = localStorage.getItem('gym_logs_simple');
+    const savedSession = localStorage.getItem('gym_session_simple');
+    
+    if (savedLogs) setLogs(JSON.parse(savedLogs));
+    if (savedSession) setSessionState(JSON.parse(savedSession));
+
+    // 2. Carica SCHEDA PERSONALIZZATA (Se esiste)
+    const savedPlan = localStorage.getItem('gym_plan_custom');
+    if (savedPlan) {
+        try {
+            setWorkoutData(JSON.parse(savedPlan));
+        } catch (e) {
+            console.error("Errore caricamento scheda custom", e);
+        }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('gym_session_simple', JSON.stringify(sessionState));
+  }, [sessionState]);
+
+  useEffect(() => {
+    let interval = null;
+    if (timerValues.isRunning) {
+      interval = setInterval(() => {
+        setTimerValues(prev => ({ ...prev, time: prev.time + 1 }));
+      }, 1000);
+    } else {
+      clearInterval(interval);
+    }
+    return () => clearInterval(interval);
+  }, [timerValues.isRunning]);
+
+  // --- HELPERS ---
+  const getValueForSet = (val, index) => {
+    if (Array.isArray(val)) return val[index] || val[val.length - 1];
+    return val;
+  };
+
+  const getTodayDate = () => new Date().toLocaleDateString('it-IT');
+
+  const getActiveSetIndex = (exerciseId, totalSets) => {
+    const currentSets = sessionState[exerciseId] || [];
+    for (let i = 0; i < totalSets; i++) {
+        if (!currentSets[i] || !currentSets[i].completed) {
+            return i;
+        }
+    }
+    return -1;
+  };
+
+  // --- GESTIONE SCHEDA (PLAN) ---
+  const importPlan = (event) => {
+    const fileReader = new FileReader();
+    fileReader.readAsText(event.target.files[0], "UTF-8");
+    fileReader.onload = e => {
+      try {
+        const newPlan = JSON.parse(e.target.result);
+        // Validazione minima
+        if (typeof newPlan !== 'object' || Object.keys(newPlan).length === 0) {
+            alert("Formato file non valido.");
+            return;
+        }
+        setWorkoutData(newPlan);
+        localStorage.setItem('gym_plan_custom', JSON.stringify(newPlan));
+        alert("Nuova scheda caricata con successo!");
+        setView('home');
+      } catch (err) {
+        alert("Errore nella lettura del file scheda.");
+      }
+    };
+  };
+
+  const resetPlan = () => {
+      if(confirm("Vuoi cancellare la scheda personalizzata e tornare a quella di default?")) {
+          localStorage.removeItem('gym_plan_custom');
+          setWorkoutData(DEFAULT_WORKOUT_DATA);
+          alert("Scheda di default ripristinata.");
+      }
+  };
+
+  // --- GESTIONE BACKUP DATI ---
+  const exportData = () => {
+    const dataStr = JSON.stringify(logs);
+    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+    const exportFileDefaultName = `GymTracker_History_${new Date().toISOString().slice(0,10)}.json`;
+    const linkElement = document.createElement('a');
+    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('download', exportFileDefaultName);
+    linkElement.click();
+  };
+
+  const importData = (event) => {
+    const fileReader = new FileReader();
+    fileReader.readAsText(event.target.files[0], "UTF-8");
+    fileReader.onload = e => {
+      try {
+        const parsedData = JSON.parse(e.target.result);
+        setLogs(parsedData);
+        localStorage.setItem('gym_logs_simple', JSON.stringify(parsedData));
+        alert("Storico ripristinato!");
+      } catch (err) {
+        alert("Errore nel file di storico.");
+      }
+    };
+  };
+
+  // --- AZIONI WORKOUT ---
+  const startWorkout = (dayName) => {
+    setActiveDay(dayName);
+    setCurrentExerciseIndex(0);
+    setView('workout');
+  };
+
+  const updateWeight = (exerciseId, setIndex, value) => {
+    const currentSets = sessionState[exerciseId] || [];
+    const exerciseDef = workoutData[activeDay].find(e => e.id === exerciseId);
+    
+    const newSets = [...currentSets];
+    while(newSets.length < exerciseDef.sets) {
+        newSets.push({ weight: '', completed: false });
+    }
+
+    newSets[setIndex] = { ...newSets[setIndex], weight: value };
+    setSessionState(prev => ({ ...prev, [exerciseId]: newSets }));
+  };
+
+  const toggleCompleteSet = (exerciseId, setIndex) => {
+    const currentSets = sessionState[exerciseId] || [];
+    const newSets = [...currentSets];
+    const exerciseDef = workoutData[activeDay].find(e => e.id === exerciseId);
+    
+     while(newSets.length < exerciseDef.sets) {
+        newSets.push({ weight: '', completed: false });
+    }
+
+    const isCompleted = !newSets[setIndex].completed;
+    newSets[setIndex] = { ...newSets[setIndex], completed: isCompleted };
+    
+    setSessionState(prev => ({ ...prev, [exerciseId]: newSets }));
+
+    if (isCompleted) {
+        const today = getTodayDate();
+        setLogs(prev => {
+            const exLogs = prev[exerciseId] || [];
+            const todayIdx = exLogs.findIndex(l => l.date === today);
+            let newExLogs = [...exLogs];
+            
+            if (todayIdx >= 0) {
+                newExLogs[todayIdx] = { ...newExLogs[todayIdx], sets: newSets };
+            } else {
+                newExLogs = [{ date: today, timestamp: Date.now(), sets: newSets }, ...exLogs];
+            }
+            localStorage.setItem('gym_logs_simple', JSON.stringify({ ...prev, [exerciseId]: newExLogs }));
+            return { ...prev, [exerciseId]: newExLogs };
+        });
+
+        if (setIndex < exerciseDef.sets - 1) {
+            setTimerValues({ time: 0, isRunning: true });
+        }
+    }
+  };
+
+  const nextExercise = () => {
+    if (currentExerciseIndex < workoutData[activeDay].length - 1) {
+        setCurrentExerciseIndex(prev => prev + 1);
+        setTimerValues({ time: 0, isRunning: false });
+    } else {
+        if(window.confirm("Allenamento terminato?")) setView('home');
+    }
+  };
+
+  const prevExercise = () => {
+      if (currentExerciseIndex > 0) setCurrentExerciseIndex(prev => prev - 1);
+  };
+
+  // --- COMPONENTS ---
+  const TimerBar = ({ targetRest }) => {
+    const formatTime = (seconds) => {
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    };
+
+    return (
+      <div className="bg-slate-800 border-t border-slate-700 px-4 py-3 flex items-center justify-between">
+         <div className="flex items-center gap-3">
+             <div className="text-center min-w-[50px]">
+                 <div className="text-[10px] text-slate-400 font-bold uppercase">Rest</div>
+                 <div className="text-white font-bold text-sm">{targetRest}</div>
+             </div>
+             <div className="h-8 w-px bg-slate-600 mx-2"></div>
+             <Clock size={20} className="text-blue-400" />
+             <span className={`font-mono text-2xl font-bold w-16 ${timerValues.isRunning ? 'text-blue-400' : 'text-slate-500'}`}>
+               {formatTime(timerValues.time)}
+             </span>
+         </div>
+         <button 
+           onClick={() => setTimerValues(prev => ({ ...prev, isRunning: !prev.isRunning }))}
+           className={`px-6 py-2 rounded-full font-bold text-sm flex items-center gap-2 transition-all ${timerValues.isRunning ? 'bg-red-500/20 text-red-400' : 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'}`}
+         >
+           {timerValues.isRunning ? <Square size={12} fill="currentColor"/> : <Play size={12} fill="currentColor"/>}
+           {timerValues.isRunning ? 'STOP' : 'START'}
+         </button>
+      </div>
+    );
+  };
+
+  const HistoryModal = ({ exerciseId, exerciseName, onClose }) => {
+    const history = logs[exerciseId] || [];
+    return (
+      <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={onClose}>
+        <div className="bg-slate-900 w-full max-w-sm rounded-2xl border border-slate-700 p-4 max-h-[70vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+           <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-2">
+               <h3 className="font-bold text-white truncate pr-2">{exerciseName}</h3>
+               <button onClick={onClose}><X size={20} className="text-slate-400"/></button>
+           </div>
+           
+           {history.length === 0 ? <p className="text-slate-500 text-center py-4">Nessun dato.</p> : (
+               history.map((h, i) => (
+                   <div key={i} className="mb-3 bg-slate-800/50 p-2 rounded-lg">
+                       <div className="text-xs text-blue-400 font-bold mb-1 flex justify-between">
+                           <span>{h.date}</span>
+                           <span className="text-slate-500">{h.sets.filter(s => s.completed).length} Serie</span>
+                       </div>
+                       <div className="flex flex-wrap gap-2">
+                           {h.sets.map((s, j) => (
+                               s.completed && (
+                                   <div key={j} className="flex flex-col items-center bg-slate-800 px-2 py-1 rounded border border-slate-700 min-w-[40px]">
+                                       <span className="text-[9px] text-slate-500">{j+1}</span>
+                                       <span className="text-sm font-bold text-white">{s.weight}</span>
+                                   </div>
+                               )
+                           ))}
+                       </div>
+                   </div>
+               ))
+           )}
+        </div>
+      </div>
+    );
+  };
+
+  // --- RENDER: SETTINGS ---
+  if (view === 'settings') {
+      return (
+        <div className="min-h-screen bg-slate-950 text-white p-6 flex flex-col overflow-y-auto">
+            <div className="flex items-center gap-4 mb-6">
+                <button onClick={() => setView('home')}><ArrowLeft className="text-slate-400"/></button>
+                <h1 className="text-2xl font-bold">Impostazioni</h1>
+            </div>
+
+            <div className="space-y-6 pb-10">
+                
+                {/* SEZIONE GESTIONE SCHEDA */}
+                <div className="bg-slate-900 p-5 rounded-2xl border border-blue-500/30 shadow-lg shadow-blue-900/10">
+                    <h2 className="text-lg font-bold mb-3 flex items-center gap-2 text-blue-400">
+                        <FileJson size={20}/> Gestione Scheda
+                    </h2>
+                    <p className="text-slate-400 text-sm mb-4">Carica una nuova scheda in formato JSON. Sovrascriverà quella attuale.</p>
+                    
+                    <input 
+                        type="file" 
+                        accept=".json" 
+                        ref={planInputRef}
+                        style={{display: 'none'}} 
+                        onChange={importPlan}
+                    />
+                    
+                    <div className="flex flex-col gap-3">
+                        <button onClick={() => planInputRef.current.click()} className="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl text-white font-bold shadow-lg shadow-blue-600/20 flex justify-center gap-2 items-center">
+                            <Upload size={18}/> Carica Nuova Scheda
+                        </button>
+
+                        <button onClick={resetPlan} className="w-full bg-slate-800 hover:bg-red-900/20 py-3 rounded-xl text-red-400 font-bold border border-slate-700 flex justify-center gap-2 items-center text-sm">
+                            <Trash2 size={16}/> Ripristina Default
+                        </button>
+                    </div>
+                </div>
+
+                {/* SEZIONE GESTIONE DATI STORICI */}
+                <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800">
+                    <h2 className="text-lg font-bold mb-3 flex items-center gap-2 text-emerald-400">
+                        <Save size={20}/> Backup Storico
+                    </h2>
+                    <p className="text-slate-400 text-sm mb-4">Salva o ripristina i tuoi progressi (Kg sollevati, date, ecc).</p>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={exportData} className="bg-slate-800 hover:bg-slate-700 py-3 rounded-xl text-emerald-400 font-bold border border-slate-700 flex flex-col items-center gap-1 text-sm">
+                            <Download size={20}/> Scarica
+                        </button>
+                        
+                        <input type="file" accept=".json" ref={backupInputRef} style={{display: 'none'}} onChange={importData}/>
+                        <button onClick={() => backupInputRef.current.click()} className="bg-slate-800 hover:bg-slate-700 py-3 rounded-xl text-blue-400 font-bold border border-slate-700 flex flex-col items-center gap-1 text-sm">
+                            <Upload size={20}/> Ripristina
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+      );
+  }
+
+  // --- RENDER: HOME ---
+  if (view === 'home') return (
+    <div className="min-h-screen bg-slate-950 text-white p-6 flex flex-col">
+        <div className="flex justify-between items-center mb-6 mt-2">
+            <div>
+                <h1 className="text-2xl font-extrabold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
+                    GymTracker
+                </h1>
+                <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Dynamic Plan</p>
+            </div>
+            <button onClick={() => setView('settings')} className="p-2 bg-slate-900 rounded-full text-slate-400 border border-slate-800">
+                <Settings size={20}/>
+            </button>
+        </div>
+
+        <div className="flex-1 space-y-4">
+            {Object.keys(workoutData).length === 0 ? (
+                <div className="text-center text-slate-500 mt-10">
+                    <p>Nessuna scheda caricata.</p>
+                    <button onClick={() => setView('settings')} className="text-blue-400 underline mt-2">Vai a Impostazioni</button>
+                </div>
+            ) : (
+                Object.keys(workoutData).map(day => (
+                    <button key={day} onClick={() => startWorkout(day)} className="w-full bg-slate-900 p-6 rounded-2xl mb-2 text-left border border-slate-800 hover:border-blue-500/50 transition-all group relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <Dumbbell size={64}/>
+                        </div>
+                        <div className="relative z-10">
+                            <h3 className="font-bold text-lg text-white mb-1">{day.split('(')[0]}</h3>
+                            <p className="text-sm text-slate-400 font-medium">{day.split('(')[1]?.replace(')', '') || 'Scheda Personalizzata'}</p>
+                            <div className="mt-4 inline-flex items-center gap-2 text-blue-400 text-sm font-bold">
+                                Inizia <ChevronRight size={16}/>
+                            </div>
+                        </div>
+                    </button>
+                ))
+            )}
+        </div>
+    </div>
+  );
+
+  // --- RENDER: WORKOUT ---
+  const exercises = workoutData[activeDay];
+  const currentEx = exercises[currentExerciseIndex];
+  const currentSets = sessionState[currentEx.id] || [];
+  const activeSetIndex = getActiveSetIndex(currentEx.id, currentEx.sets);
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-white flex flex-col">
+        
+        {/* Header */}
+        <div className="p-4 bg-slate-900 border-b border-slate-800 flex items-center justify-between sticky top-0 z-20 shadow-xl">
+            <button onClick={() => setView('home')} className="p-2 -ml-2 text-slate-400"><ArrowLeft/></button>
+            <div className="flex gap-1">
+                {exercises.map((_, i) => (
+                    <div key={i} className={`h-1.5 rounded-full transition-all duration-300 ${i === currentExerciseIndex ? 'w-8 bg-blue-500' : 'w-2 bg-slate-700'}`}/>
+                ))}
+            </div>
+            <button onClick={() => setShowHistory(true)} className="p-2 -mr-2 text-slate-400"><History/></button>
+        </div>
+
+        {/* Contenuto Esercizio */}
+        <div className="flex-1 overflow-y-auto p-4 pb-32">
+            <div className="mb-6">
+                <h2 className="text-2xl font-bold leading-tight mb-2">{currentEx.name}</h2>
+                <div className="flex flex-wrap gap-2 text-xs font-bold">
+                    <span className="flex items-center gap-1 bg-slate-800 px-2 py-1 rounded text-emerald-400 border border-slate-700">
+                        <TimerIcon size={12}/> {currentEx.rest}
+                    </span>
+                    {currentEx.tempo && (
+                        <span className="flex items-center gap-1 bg-slate-800 px-2 py-1 rounded text-purple-400 border border-slate-700">
+                            <Activity size={12}/> {currentEx.tempo}
+                        </span>
+                    )}
+                </div>
+            </div>
+
+            {/* Lista Serie */}
+            <div className="space-y-3">
+                <div className="grid grid-cols-12 px-2 mb-1 text-[10px] text-slate-500 uppercase font-bold text-center tracking-wider">
+                    <div className="col-span-1">#</div>
+                    <div className="col-span-3">Reps</div>
+                    <div className="col-span-2">RPE</div>
+                    <div className="col-span-4">Carico</div>
+                    <div className="col-span-2">Ok</div>
+                </div>
+
+                {Array.from({ length: currentEx.sets }).map((_, idx) => {
+                    const setData = currentSets[idx] || { weight: '', completed: false };
+                    const isDone = setData.completed;
+                    const isActive = idx === activeSetIndex; 
+                    
+                    const lastLog = logs[currentEx.id]?.find(l => l.date !== getTodayDate());
+                    const lastWeight = lastLog?.sets[idx]?.weight;
+
+                    return (
+                        <div key={idx} 
+                             className={`grid grid-cols-12 gap-2 items-center p-3 rounded-xl border transition-all duration-300 relative
+                                ${isActive ? 'bg-blue-900/10 border-blue-500/50 shadow-[0_0_20px_rgba(59,130,246,0.15)] z-10' : ''}
+                                ${isDone ? 'bg-emerald-900/5 border-emerald-900/20 opacity-50 grayscale-[0.5]' : ''}
+                                ${!isActive && !isDone ? 'bg-slate-900 border-slate-800' : ''}
+                             `}>
+                            
+                            {isActive && (
+                                <div className="absolute -left-1 top-1/2 -translate-y-1/2 -translate-x-full pr-2">
+                                    <div className="bg-blue-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded animate-pulse shadow-lg shadow-blue-500/50">
+                                        ORA
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="col-span-1 flex justify-center">
+                                <span className={`text-xs font-bold ${isActive ? 'text-blue-400' : 'text-slate-600'}`}>{idx + 1}</span>
+                            </div>
+
+                            <div className="col-span-3 text-center font-bold text-slate-300 text-sm">
+                                {getValueForSet(currentEx.reps, idx)}
+                            </div>
+
+                            <div className="col-span-2 text-center font-bold text-yellow-600 text-sm">
+                                @{getValueForSet(currentEx.rpe, idx)}
+                            </div>
+
+                            <div className="col-span-4 relative">
+                                {isActive && lastWeight && (
+                                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] text-slate-500 whitespace-nowrap">
+                                        Ultimo: {lastWeight}kg
+                                    </div>
+                                )}
+                                <input 
+                                    type="number"
+                                    placeholder={isActive ? (lastWeight || "kg") : "-"}
+                                    value={setData.weight}
+                                    onChange={(e) => updateWeight(currentEx.id, idx, e.target.value)}
+                                    className={`w-full text-center py-2 rounded-lg font-bold text-lg outline-none transition-colors
+                                        ${isActive ? 'bg-slate-800 text-white placeholder-slate-600 border border-slate-600 focus:border-blue-500' : 'bg-transparent text-slate-500 border border-transparent'}
+                                    `}
+                                />
+                            </div>
+
+                            <div className="col-span-2 flex justify-center">
+                                <button 
+                                    onClick={() => toggleCompleteSet(currentEx.id, idx)}
+                                    className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${isDone ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-slate-800 text-slate-600 hover:bg-slate-700 border border-slate-700'}`}
+                                >
+                                    <Check size={18} strokeWidth={3}/>
+                                </button>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+
+        {/* Footer Navigation & Timer */}
+        <div className="mt-auto z-20 shadow-2xl">
+            <TimerBar targetRest={currentEx.rest} />
+            <div className="bg-slate-900 p-4 pb-8 flex gap-3 border-t border-slate-800">
+                <button onClick={prevExercise} disabled={currentExerciseIndex === 0} className="p-4 rounded-xl bg-slate-800 text-slate-400 disabled:opacity-20 border border-slate-700">
+                    <ChevronLeft/>
+                </button>
+                <button onClick={nextExercise} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl py-4 flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20 active:scale-[0.98] transition-transform">
+                    {currentExerciseIndex === exercises.length - 1 ? 'Termina' : 'Prossimo'}
+                    <ChevronRight size={20}/>
+                </button>
+            </div>
+        </div>
+
+        {showHistory && <HistoryModal exerciseId={currentEx.id} exerciseName={currentEx.name} onClose={() => setShowHistory(false)} />}
+    </div>
+  );
+};
+
+export default App;
