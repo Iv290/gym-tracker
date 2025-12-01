@@ -110,7 +110,7 @@
 
         // --- HELPERS ---
         const getValueForSet = (val, index) => {
-            if (!val) return "-";
+            if (!val) return "-"; // Gestione valori mancanti
             if (Array.isArray(val)) return val[index] || val[val.length - 1];
             return val;
         };
@@ -187,7 +187,6 @@
             setActiveDay(dayName);
             setCurrentExerciseIndex(0);
             setView('workout');
-            // Nota: Non precompiliamo più i dati. Le caselle partono vuote.
         };
 
         const updateWeight = (exerciseId, setIndex, value) => {
@@ -244,12 +243,7 @@
                 setCurrentExerciseIndex(prev => prev + 1);
                 setTimerValues({ time: 0, isRunning: false });
             } else {
-                // MODIFICA: Pulisce la sessione quando l'allenamento è finito
-                if(window.confirm("Allenamento terminato? Vuoi chiudere e pulire la scheda?")) {
-                    setSessionState({}); 
-                    localStorage.removeItem('gym_session_simple');
-                    setView('home');
-                }
+                if(window.confirm("Allenamento terminato?")) setView('home');
             }
         };
 
@@ -462,7 +456,7 @@
                     </div>
 
                     {/* Lista Serie */}
-                    <div className="space-y-4"> {/* Aumentato spazio da 3 a 4 per le etichette */}
+                    <div className="space-y-3">
                         <div className="grid grid-cols-12 px-2 mb-1 text-[10px] text-slate-500 uppercase font-bold text-center tracking-wider">
                             <div className="col-span-1">#</div>
                             <div className="col-span-3">Reps</div>
@@ -490,7 +484,6 @@
                                         ${!isActive && !isDone ? 'bg-slate-900 border-slate-800' : ''}
                                     `}>
                                     
-                                    {/* Indicatore "ORA" solo sulla serie attiva */}
                                     {isActive && (
                                         <div className="absolute -left-1 top-1/2 -translate-y-1/2 -translate-x-full pr-2">
                                             <div className="bg-blue-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded animate-pulse shadow-lg shadow-blue-500/50">
@@ -512,15 +505,14 @@
                                     </div>
 
                                     <div className="col-span-4 relative">
-                                        {/* MODIFICA: Il dato storico appare SEMPRE (se esiste), sopra la casella */}
-                                        {lastWeight && (
-                                            <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] text-slate-500 whitespace-nowrap bg-slate-900/80 px-1 rounded">
+                                        {isActive && lastWeight && (
+                                            <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] text-slate-500 whitespace-nowrap">
                                                 Ultimo: {lastWeight}kg
                                             </div>
                                         )}
                                         <input 
                                             type="number"
-                                            placeholder="kg"
+                                            placeholder={isActive ? (lastWeight || "kg") : "-"}
                                             value={setData.weight}
                                             onChange={(e) => updateWeight(currentEx.id, idx, e.target.value)}
                                             className={`w-full text-center py-2 rounded-lg font-bold text-lg outline-none transition-colors
